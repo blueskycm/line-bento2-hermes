@@ -2,12 +2,15 @@ import os
 import json
 import time
 import urllib.request
+import re
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter 
-from sheets_helper import write_to_sheets  
+from sheets_helper import write_to_sheets, SHEET_ID, SCOPES
+import gspread
+from google.oauth2.service_account import Credentials
 from google import genai
 from google.genai import types
 
@@ -31,6 +34,37 @@ sa_path = os.path.join(os.path.dirname(__file__), "serviceAccount.json")
 cred = credentials.Certificate(sa_path)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
+
+# ==========================================
+# 承襲前案：Google Drive 圖片連結轉換器
+# ==========================================
+def _convert_drive_link(url: str) -> str:
+    if not url: return ""
+    m = re.search(r"/file/d/([a-zA-Z0-9_-]+)", url)
+    if m:
+        return f"https://drive.google.com/thumbnail?id={m.group(1)}&sz=w640"
+    return url.strip()
+
+# ==========================================
+# 動態查表：利用你現有的 gspread 機制讀取 LINE_SETTING
+# ==========================================
+def fetch_line_settings() -> dict:
+    """
+    自 LINE_SETTING 工作表讀取動態設定 (包含主圖、Flex 模板等)
+    """
+    try:
+        creds = Credentials.from_service_account_file(sa_path, scopes=SCOPES)
+        g_client = gspread.authorize(creds)
+        spreadsheet = g_client.open_by_key(SHEET_ID)
+        worksheet = spreadsheet.worksheet("LINE_SETTING")
+        records = worksheet.get_all_values()
+        
+        # 轉成 dict 方便快速鍵值反查
+        settings = {row[0].strip(): row[1].strip() for row in records if len(row) >= 2}
+        return settings
+    except Exception as e:
+        print(f"⚠️ Worker 讀取 LINE_SETTING 失敗，將啟用防呆預設方案: {e}")
+        return {}
 
 # ==========================================
 # 1. 呼叫新版 Gemini 大腦，按照 .md 檔進行語意解析
@@ -91,36 +125,41 @@ def get_fallback_json(today_str: str, raw_text: str) -> dict:
     }
 
 # ==========================================
-# 2. LINE Reply 回覆函數
+# 2. LINE Reply 回覆函數 (動態樣式與顏色)
 # ==========================================
 def send_group_reply_flex_message(reply_token: str, meal_type: str, vendor: str, deadline: str):
     prefix = "午餐" if meal_type == "LUNCH" else "晚餐"
-    BOT_CHAT_URL = "https://lin.ee/NcXk8Kx"  
+    BOT_CHAT_URL = "https://lin.ee/NcXk8Kx" 
     
-    bubble = {
-        "type": "bubble",
-        "size": "kilo",
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {"type": "text", "text": f"🔔 {prefix}點餐通知", "weight": "bold", "color": "#1DB446", "size": "sm"},
-                {"type": "text", "text": f"最新菜單已發布 ({vendor})", "weight": "bold", "size": "xl", "margin": "md"},
-                {"type": "text", "text": f"截止時間：{deadline}\n為了避免群組洗版，請點擊下方按鈕，前往「私訊」機器人完成點餐喔！", "size": "xs", "color": "#666666", "wrap": True, "margin": "md"}
-            ]
-        },
-        "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {"type": "button", "style": "primary", "color": "#1DB446", "action": {"type": "uri", "label": "💬 點我私訊點餐", "uri": BOT_CHAT_URL}}
-            ]
-        }
-    }
+    # 讀取 LINE_SETTING 動態設定
+    settings = fetch_line_settings()
+    
+    raw_img_url = settings.get(f"訂{prefix}主圖", "")
+    img_url = _convert_drive_link(raw_img_url) if raw_img_url else ""
+    alt_text = settings.get(f"{meal_type}_ALT_TEXT", f"🍱 {prefix}開團囉！請私訊機器人")
+    
+    # 檢查是否有在 LINE_SETTING 設定自訂的 Flex JSON 模板字串
+    flex_template_key = f"{meal_type}_FLEX_TEMPLATE"
+    
+    if flex_template_key in settings and settings[flex_template_key]:
+        print(f"🎯 偵測到試算表配置了 {flex_template_key} 專屬圖卡範本！")
+        try:
+            bubble = json.loads(settings[flex_template_key])
+            if img_url and "hero" in bubble and "url" in bubble["hero"]:
+                bubble["hero"]["url"] = img_url
+        except Exception as e:
+            print(f"❌ 範本 JSON 解析失敗，切換回程式預設動態卡片: {e}")
+            bubble = _build_default_bubble(prefix, vendor, deadline, BOT_CHAT_URL, settings)
+    else:
+        # 若沒有配置自訂範本，則走動態渲染卡片 (注入 settings 進行動態配色)
+        print(f"ℹ️ 未設定 {flex_template_key}，使用 Python 內建標準圖卡。")
+        bubble = _build_default_bubble(prefix, vendor, deadline, BOT_CHAT_URL, settings)
+        if img_url:
+            bubble["hero"] = {"type": "image", "url": img_url, "size": "full", "aspectRatio": "1:1", "aspectMode": "cover"}
 
     payload = {
         "replyToken": reply_token,
-        "messages": [{"type": "flex", "altText": f"🍱 {prefix}開團囉！請私訊機器人", "contents": bubble}]
+        "messages": [{"type": "flex", "altText": alt_text, "contents": bubble}]
     }
     
     if not LINE_ACCESS_TOKEN:
@@ -141,6 +180,34 @@ def send_group_reply_flex_message(reply_token: str, meal_type: str, vendor: str,
         print("🎉 [Reply 成功] 已成功使用 replyToken 免費發送開團圖卡！")
     except Exception as e:
         print(f"❌ Reply 發送失敗 (可能 replyToken 已過期): {e}")
+
+def _build_default_bubble(prefix: str, vendor: str, deadline: str, bot_chat_url: str, settings: dict) -> dict:
+    """從 settings 讀取試算表中的顏色與樣式設定，完美還原前案功能"""
+    # 提取試算表配色與按鈕樣式，並套用基礎防呆預設值
+    title_color = settings.get(f"訂{prefix}標題顏色", "#1DB446")
+    btn_color = settings.get(f"訂{prefix}按鈕顏色", "#1DB446")
+    btn_style = settings.get(f"訂{prefix}按鈕樣式", "primary").lower()
+
+    return {
+        "type": "bubble",
+        "size": "kilo",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": f"🔔 {prefix}點餐通知", "weight": "bold", "color": title_color, "size": "sm"},
+                {"type": "text", "text": f"最新菜單已發布 ({vendor})", "weight": "bold", "size": "xl", "margin": "md"},
+                {"type": "text", "text": f"截止時間：{deadline}\n為了避免群組洗版，請點擊下方按鈕，前往「私訊」機器人完成點餐喔！", "size": "xs", "color": "#666666", "wrap": True, "margin": "md"}
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "button", "style": btn_style, "color": btn_color, "action": {"type": "uri", "label": "💬 點我私訊點餐", "uri": bot_chat_url}}
+            ]
+        }
+    }
 
 # ==========================================
 # 3. 任務佇列監聽器
@@ -173,16 +240,11 @@ def listen_to_queue():
                 # 使用者身分識別：如果前線撈到的是未知使用者，直接去 USERS 表格依據 UID 抓出真名
                 if task_user_name == "未知使用者":
                     try:
-                        from sheets_helper import SHEET_ID, SCOPES
-                        import gspread
-                        from google.oauth2.service_account import Credentials
-                        
-                        # 讀取 USERS 工作表
-                        sa_path = os.path.join(os.path.dirname(__file__), "serviceAccount.json")
+                        # 🎯 統一改用你原本 source: 8 就寫好的 gspread 在地反查流程
                         creds = Credentials.from_service_account_file(sa_path, scopes=SCOPES)
-                        client = gspread.authorize(creds)
-                        users_sheet = client.open_by_key(SHEET_ID).worksheet("USERS")
-                        all_users = users_sheet.get_all_values() # 撈出整張表
+                        g_client = gspread.authorize(creds)
+                        users_sheet = g_client.open_by_key(SHEET_ID).worksheet("USERS")
+                        all_users = users_sheet.get_all_values() 
                         
                         for row in all_users:
                             if len(row) >= 3 and row[1].strip() == task_user_id.strip():
