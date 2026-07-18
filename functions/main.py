@@ -112,7 +112,7 @@ def _get_user_info(service, sheet_id: str, user_id: str):
 # ==========================================
 def _push_task_to_hermes_queue(event: dict) -> bool:
     """
-    將 LINE Webhook 拿到的老闆開團訊息寫入 Firestore 作為任務佇列 (升級版)
+    將 LINE Webhook 拿到的老闆開團訊息寫入 Firestore 作為任務佇列
     """
     try:
         user_id = event.get("source", {}).get("userId")
@@ -120,7 +120,7 @@ def _push_task_to_hermes_queue(event: dict) -> bool:
         text = event.get("message", {}).get("text", "").strip()
         reply_token = event.get("replyToken")
         
-        # 🟢 新增：在雲端前線先調用 LINE API 撈取該使用者的真實 LINE 暱稱
+        # 在雲端前線先調用 LINE API 撈取該使用者的真實 LINE 暱稱
         channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
         display_name = _get_line_profile(user_id, channel_access_token)
 
@@ -128,12 +128,12 @@ def _push_task_to_hermes_queue(event: dict) -> bool:
         now_str = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M:%S")
 
         task_data = {
-            "status": "PENDING",             # PENDING ➔ 本地 Hermes 看到會拉去處理
+            "status": "PENDING",            # PENDING ➔ 本地 Hermes 看到會拉去處理
             "createdAt": now_str,
-            "replyToken": reply_token,        # 保留這個生命線給本地 Worker 免費 Reply
+            "replyToken": reply_token,      # 保留這個生命線給本地 Worker 免費 Reply
             "text": text,
             "userId": user_id,
-            "displayName": display_name,     # 🟢 新增：傳遞真實暱稱給本地 Worker，拒絕未知使用者
+            "displayName": display_name,    # 傳遞真實暱稱給本地 Worker，拒絕未知使用者
             "groupId": group_id,
             "handledBy": None,
             "completedAt": None
@@ -155,7 +155,6 @@ def _push_task_to_hermes_queue(event: dict) -> bool:
     memory=512
 )
 def line_webhook(req: https_fn.Request) -> Response:
-    # 這裡面依然使用 os.getenv 讀取環境變數，它會自動抓取你 .env 檔案中的值！
     channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
     channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
     sheet_id = os.getenv("SHEET_ID", "")
@@ -223,7 +222,7 @@ def line_webhook(req: https_fn.Request) -> Response:
             reply_token = event.get("replyToken")
 
             # ──────────────────────────────────────────────────
-            # 【A軌】老闆群組開團 ➔ 終極完美版：只允許藍色標註 + 啟動通用打字中動畫
+            # 【A軌】老闆群組開團：只允許藍色標註
             # ──────────────────────────────────────────────────
             if source_type in ["group", "room"]:
                 mention_obj = event.get("message", {}).get("mention", {})
@@ -245,7 +244,7 @@ def line_webhook(req: https_fn.Request) -> Response:
                         # 3. 將包含真實暱稱與生命線 replyToken 的任務丟入佇列
                         success = _push_task_to_hermes_queue(event)
                         if success:
-                            # 🎯 精準切斷：成功開團即秒回 Response，絕不往下走私訊點餐的邏輯判斷
+                            # 成功開團即秒回 Response
                             return Response("OK", status=200)
 
             # --- 權限預檢邏輯 ---
@@ -259,7 +258,7 @@ def line_webhook(req: https_fn.Request) -> Response:
                     return Response("OK", status=200)
 
             # ──────────────────────────────────────────────────
-            # 【B軌】私訊內點餐 ➔ 純正規化狀態機邏輯 (完全不經過 AI，高速執行)
+            # 【B軌】私訊內點餐 ➔ 純正規化狀態機邏輯，完全不經過 AI，高速執行
             # ──────────────────────────────────────────────────
             
             # 1. 優先處理「手動輸入數量」狀態的純數字
@@ -358,7 +357,7 @@ def _handle_reports(reply_token: str, user_id: str, text: str, access_token: str
         if len(r) >= 6 and r[1]:
             phone_dict[r[1]] = str(r[5]).strip()
 
-    # ⭐ 建立群組反向對應字典 (顯示名稱 -> 原始代號，例如 "資海-午噹噹" -> "氣象署2")
+    # 建立群組反向對應字典 (顯示名稱 -> 原始代號，例如 "資海-午噹噹" -> "氣象署2")
     setting_rows = _read_values(service, sheet_id, "LINE_SETTING!A1:B20")
     reverse_group_map = {}
     for r in setting_rows:
@@ -1321,7 +1320,7 @@ def _sync_rich_menu(user_id, reply_token=None):
         # 2. 定義你的 Rich Menu ID (請替換為步驟 1 取得的真實 ID)
         # 也可以寫在 LINE_SETTING 工作表由程式讀取
         RICH_MENU_USER = "richmenu-18883912"  # 使用者選單 (18883912)
-        RICH_MENU_ADMIN = "richmenu-18904595" # 管理者選單 (18904595)
+        RICH_MENU_ADMIN = "richmenu-e65b4d5e9560e75074548f2c95052d8f"
         
         target_id = RICH_MENU_ADMIN if user_role == "ADMIN" else RICH_MENU_USER
         
