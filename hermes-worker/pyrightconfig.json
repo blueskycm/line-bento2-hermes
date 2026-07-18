@@ -1,0 +1,7 @@
+{
+  "venvPath": "c:\\firebase\\bento2-hermes-worker",
+  "venv": "venv",
+  "extraPaths": [
+    "c:\\firebase\\bento2-hermes-worker\\venv\\Lib\\site-packages"
+  ]
+}

@@ -1,0 +1,14 @@
+# Firebase functions SDK (讓 pip 自動抓取最新 0.x 穩定版)
+firebase-functions
+firebase-admin
+
+# LINE Bot SDK
+line-bot-sdk>=3.0.0
+
+# Google Sheets API SDK
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+
+# 網頁處理
+flask

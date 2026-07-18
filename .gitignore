@@ -1,0 +1,72 @@
+# ==========================================
+# 敏感環境變數與憑證（絕對不可上 GitHub ⚠️）
+# ==========================================
+**/.env
+**/serviceAccount.json
+.env
+serviceAccount.json
+functions/serviceAccount.json
+functions/.env
+public/.env
+
+# ==========================================
+# Firebase 系統快取與日誌 (Logs)
+# ==========================================
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
+.firebase/
+
+# ==========================================
+# Python 虛擬環境與編譯快取 (🟢 全新加入)
+# ==========================================
+**/venv/
+**/.venv/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# ==========================================
+# Node.js / Dependency 相關
+# ==========================================
+node_modules/
+.npm
+.eslintcache
+.node_repl_history
+*.tgz
+.yarn-integrity
+.dataconnect
+
+# ==========================================
+# Runtime & Test data
+# ==========================================
+pids
+*.pid
+*.seed
+*.pid.lock
+lib-cov
+coverage
+.nyc_output
+.grunt
+bower_components
+.lock-wscript
+build/Release
+
+# ==========================================
+# 作業系統與編輯器暫存
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ==========================================
+# 其他忽略
+# ==========================================
+CHANGELOG.md

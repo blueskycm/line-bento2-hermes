@@ -1,0 +1,13 @@
+# 環境變數管理
+python-dotenv
+
+# Google Gemini 2026 最新官方 SDK
+google-genai
+
+# Firebase Admin SDK (任務佇列與 Firestore 讀寫)
+firebase-admin
+
+# Google Sheets 試算表操作工具
+gspread
+google-auth
+google-api-python-client
